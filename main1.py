@@ -2044,6 +2044,9 @@ class ArchiveManager(QMainWindow):
             
         # 连接表头点击事件
         self.table.horizontalHeader().sectionClicked.connect(self.on_header_clicked)
+        # 确保在最开始设置窗口属性
+        self.setAttribute(Qt.WA_DeleteOnClose)
+        self.restore_state()  # ✅ 关键修改：先恢复状态再加载数据
         
     def init_chinese_font(self):
         """强制注册中文字体（从TemplateDesigner移动过来）"""
@@ -2406,60 +2409,41 @@ class ArchiveManager(QMainWindow):
         """
 
     # ======================= 状态保存与恢复 =======================
-# ======================= 状态保存与恢复 =======================
     def save_current_state(self):
-        """保存当前应用程序状态（增强选中行保存）"""
-        settings = QSettings("MyCompany", "ArchiveManager")
-        
-        # 保存搜索条件
-        settings.setValue("searchText", self.search_input.text())
-        
-        # 保存排序状态
-        settings.setValue("lastSorted", self.last_sorted)
-        settings.setValue("sortAsc", self.sort_asc)
-        
-        # 保存选中的行（使用身份证号）
-        selected_ids = []
-        id_column = -1
-        # 找到身份证号列
-        for col in range(self.table.columnCount()):
-            header = self.table.horizontalHeaderItem(col).text()
-            if header == "身份证号":
-                id_column = col
-                break
-                
-        if id_column != -1:
-            for row in range(self.table.rowCount()):
-                chk_widget = self.table.cellWidget(row, 0)
-                if chk_widget:
-                    chk = chk_widget.findChild(QCheckBox)
-                    if chk and chk.isChecked():
-                        item = self.table.item(row, id_column)
-                        if item and item.text().strip():
-                            selected_ids.append(item.text().strip())
-        
-        settings.setValue("selectedIds", json.dumps(selected_ids))
-        
-        # 保存表格列宽
-        column_widths = {}
-        for col in range(self.table.columnCount()):
-            column_widths[col] = self.table.columnWidth(col)
-        settings.setValue("columnWidths", json.dumps(column_widths))
-        
-        # 保存表格水平滚动条位置
-        settings.setValue("horizontalScroll", self.table.horizontalScrollBar().value())
-        
-        # 保存窗口几何状态
-        settings.setValue("windowGeometry", self.saveGeometry())
-        settings.setValue("windowState", self.saveState())
-        
-        # +++ 新增：保存模板设计器状态 +++
-        if hasattr(self, 'simple_template_dialog') and self.simple_template_dialog:
-            self.simple_template_dialog.save_current_config()
-        if hasattr(self, 'advanced_template_dialog') and self.advanced_template_dialog:
-            self.advanced_template_dialog.save_template_state()
+            """保存当前应用程序状态（增强选中行保存）"""
+            settings = QSettings("MyCompany", "ArchiveManager")
             
-        logger.info("当前状态已保存")
+            # 保存搜索条件
+            settings.setValue("searchText", self.search_input.text())
+            
+            # 保存排序状态
+            settings.setValue("lastSorted", self.last_sorted)
+            settings.setValue("sortAsc", self.sort_asc)
+            
+            # 保存选中的行（使用身份证号）
+            selected_ids = self.get_selected_personnel_ids()
+            settings.setValue("selectedIds", json.dumps(selected_ids))
+            
+            # 保存表格列宽
+            column_widths = {}
+            for col in range(self.table.columnCount()):
+                column_widths[col] = self.table.columnWidth(col)
+            settings.setValue("columnWidths", json.dumps(column_widths))
+            
+            # 保存表格水平滚动条位置
+            settings.setValue("horizontalScroll", self.table.horizontalScrollBar().value())
+            
+            # 保存窗口几何状态
+            settings.setValue("windowGeometry", self.saveGeometry())
+            settings.setValue("windowState", self.saveState())
+            
+            # +++ 新增：保存模板设计器状态 +++
+            if hasattr(self, 'simple_template_dialog') and self.simple_template_dialog:
+                self.simple_template_dialog.save_current_config()
+            if hasattr(self, 'advanced_template_dialog') and self.advanced_template_dialog:
+                self.advanced_template_dialog.save_template_state()
+                
+            logger.info("当前状态已保存")
         
     def restore_state(self):
         """恢复上次保存的应用程序状态"""
@@ -2538,23 +2522,7 @@ class ArchiveManager(QMainWindow):
         except Exception as e:
             logger.error(f"恢复选中状态失败: {str(e)}")
 
-    def closeEvent(self, event):
-        """关闭事件处理 - 添加保存提示"""
-        # 先保存当前状态（无论用户选择什么）
-        self.save_current_state()
-        
-        # 然后询问用户
-        reply = QMessageBox.question(
-            self, "确认退出",
-            "是否保存当前数据状态？\n保存后下次打开将恢复当前页面。",
-            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
-            QMessageBox.Save
-        )
-        
-        if reply == QMessageBox.Cancel:
-            event.ignore()
-        else:
-            event.accept()
+
         
     # ======================= 数据加载与操作 =======================
     def load_data(self, order_by=""):
@@ -3439,6 +3407,25 @@ class ArchiveManager(QMainWindow):
         settings.setValue("windowGeometry", self.saveGeometry())
         settings.setValue("windowState", self.saveState())    
                  
+    def closeEvent(self, event):
+        """关闭事件处理 - 添加保存提示"""
+        # 询问用户是否保存状态
+        reply = QMessageBox.question(
+            self, "确认退出",
+            "是否保存当前数据状态？\n保存后下次打开将恢复当前页面。",
+            QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+            QMessageBox.Save
+        )
+        
+        if reply == QMessageBox.Save:
+            # 保存当前状态
+            self.save_current_state()
+            event.accept()
+        elif reply == QMessageBox.Discard:
+            event.accept()
+        else:  # Cancel
+            event.ignore()
+
 class SortDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
